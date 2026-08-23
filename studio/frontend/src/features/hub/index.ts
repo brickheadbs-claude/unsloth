@@ -11,6 +11,7 @@ export {
   type TransportMode,
   updateExternalJob,
   useDownloadManagerStore,
+  useDownloadTransportCapabilities,
   useTransportMode,
 } from "./download-manager";
 export { HfTokenIndicator } from "./components/hf-token-indicator";

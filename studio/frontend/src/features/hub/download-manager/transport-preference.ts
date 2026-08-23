@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+// The module, not the settings barrel: that barrel reaches back into this feature, and the cycle
+// can leave these undefined at module-evaluation time depending on which side loads first.
 import {
   loadDownloadTransportSettings,
   subscribeDownloadTransportSettings,
   updateDownloadTransportSettings,
-} from "@/features/settings";
+} from "@/features/settings/api/download-transport";
 import { toast } from "@/lib/toast";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -72,9 +74,12 @@ export async function resolveTransportMode(): Promise<TransportMode> {
   return pickTransportMode(null, await hydrateInstallMode());
 }
 
+/** ``installWide: false`` keeps a write to this browser, for a correction the user did not ask for. */
+export type SetTransportOptions = { installWide?: boolean };
+
 export function useTransportMode(): [
   TransportMode,
-  (next: TransportMode) => void,
+  (next: TransportMode, options?: SetTransportOptions) => void,
 ] {
   const [mode, setMode] = useState<TransportMode>(getTransportMode);
 
@@ -106,28 +111,37 @@ export function useTransportMode(): [
     };
   }, []);
 
-  const set = useCallback((next: TransportMode) => {
-    // Persist first, reflect after: the engine reads getTransportMode() fresh
-    // from localStorage at download time, so an optimistic setMode() before a
-    // failed write (private mode / quota) would show the new transport while
-    // downloads still used the old one. On failure leave everything untouched.
-    try {
-      window.localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      toast.error("Couldn't save the download transport preference.");
-      return;
-    }
-    setMode(next);
-    window.dispatchEvent(new Event(CHANGE_EVENT));
-    // And the install's setting, so scripted callers and other browsers follow. A failure here
-    // leaves this browser on its own choice, which already applies.
-    void updateDownloadTransportSettings(next).catch((error) => {
-      console.warn(
-        "Couldn't save the download transport for this install.",
-        error,
-      );
-    });
-  }, []);
+  const set = useCallback(
+    (next: TransportMode, options?: SetTransportOptions) => {
+      // Persist first, reflect after: the engine reads getTransportMode() fresh
+      // from localStorage at download time, so an optimistic setMode() before a
+      // failed write (private mode / quota) would show the new transport while
+      // downloads still used the old one. On failure leave everything untouched.
+      try {
+        window.localStorage.setItem(STORAGE_KEY, next);
+      } catch {
+        toast.error("Couldn't save the download transport preference.");
+        return;
+      }
+      setMode(next);
+      window.dispatchEvent(new Event(CHANGE_EVENT));
+      if (options?.installWide === false) {
+        return;
+      }
+      // And the install's setting, so scripted callers and other browsers follow. Say so on failure:
+      // this browser is on the new transport and every other caller is still on the old one.
+      void updateDownloadTransportSettings(next).catch((error) => {
+        console.warn(
+          "Couldn't save the download transport for this install.",
+          error,
+        );
+        toast.error(
+          "Saved for this browser only. Couldn't save it for this install.",
+        );
+      });
+    },
+    [],
+  );
 
   return [mode, set];
 }

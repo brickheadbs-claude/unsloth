@@ -19,6 +19,9 @@ registerBundlerResolver();
 const { DEFAULT_TRANSPORT_MODE, TRANSPORT, pickTransportMode } = await import(
   "../src/features/hub/download-manager/constants.ts"
 );
+const { xetIsUnavailable } = await import(
+  "../src/features/settings/lib/download-transport-availability.ts"
+);
 
 function read(path: string): string {
   return readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
@@ -84,9 +87,18 @@ test("the row offers HTTPS and Xet, and says which one is in force", () => {
   for (const key of ["downloads.https", "downloads.xet", "downloads.auto"]) {
     assert.ok(ROW.includes(key), `${key} is missing from the row`);
   }
-  // Xet with no hf_xet is shown as unavailable rather than silently downloading over HTTPS.
-  assert.match(ROW, /xetAvailable === false/);
   assert.match(ROW, /autoResolvesTo/);
+});
+
+test("Xet is greyed out on a definite no, from either source", () => {
+  // The row's own read answered.
+  assert.equal(xetIsUnavailable(false, true), true);
+  assert.equal(xetIsUnavailable(true, false), false);
+  // It failed, so the Hub's capabilities decide rather than the option being offered anyway.
+  assert.equal(xetIsUnavailable(undefined, false), true);
+  assert.equal(xetIsUnavailable(undefined, true), false);
+  // Nothing has answered yet: no flash of a disabled option on a machine that can run Xet.
+  assert.equal(xetIsUnavailable(undefined, undefined), false);
 });
 
 test("the copy explains the difference, not just the names", () => {

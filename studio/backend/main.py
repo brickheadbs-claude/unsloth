@@ -665,6 +665,15 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         _lifespan_log.warning("cleanup_orphaned_runs failed at startup: %s", exc)
 
+    # Decide the download transport here, before any route can serve. The seed reads whether this
+    # install was used before HTTPS became the default, and app_settings is a shared table: let the
+    # first page a user opens write its own row first and a new install looks like an old one.
+    try:
+        from utils.download_transport_settings import get_download_transport_mode
+        get_download_transport_mode()
+    except Exception as exc:
+        _lifespan_log.warning("download transport seed failed at startup: %s", exc)
+
     reap_hub_orphan_workers()
     try:
         from hub.utils.download_manifest import migrate_ordinary_v2_manifests_for_downgrade

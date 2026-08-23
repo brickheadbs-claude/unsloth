@@ -95,6 +95,58 @@ def test_an_unreadable_db_is_not_prior_use(monkeypatch):
     assert transport_settings._has_prior_studio_use() is False
 
 
+@pytest.fixture
+def real_install(monkeypatch, tmp_path):
+    """A real studio.db under its own Studio home, with nothing stubbed out."""
+    monkeypatch.setenv("UNSLOTH_STUDIO_HOME", str(tmp_path))
+    monkeypatch.setattr(studio_db, "_schema_ready", False)
+    yield tmp_path
+    monkeypatch.setattr(studio_db, "_schema_ready", False)
+
+
+def test_a_seeded_install_ignores_settings_written_later(real_install):
+    """Why the seed runs at startup: app_settings is shared.
+
+    Opening Images autosaves its presets there without the user changing anything, and any row
+    looks like prior use. Deciding before a route can serve is what keeps a new install on HTTPS.
+    """
+    assert transport_settings.get_download_transport_mode() == "http"
+
+    studio_db.upsert_app_settings({"image_generation_presets": {"activePreset": "default"}})
+    transport_settings.reset_seed_cache_for_tests()
+    assert transport_settings.get_download_transport_mode() == "http"
+
+
+def test_an_install_with_history_is_still_grandfathered(real_install):
+    studio_db.upsert_app_settings({"personalization": {"theme": "dark"}})
+    assert transport_settings._has_prior_studio_use() is True
+    assert transport_settings.get_download_transport_mode() == "auto"
+
+
+def test_a_guess_from_an_unreadable_install_is_not_persisted(real_install, monkeypatch):
+    """An unreadable install answers HTTPS, but must not store it: a locked db is not a verdict."""
+    writes: dict = {}
+    monkeypatch.setattr(studio_db, "get_app_setting", lambda key, fallback = None: None)
+    monkeypatch.setattr(studio_db, "upsert_app_settings", lambda updates: writes.update(updates))
+    monkeypatch.setattr(
+        transport_settings, "_PRIOR_USE_TABLES", ("app_settings",)
+    )
+    monkeypatch.setattr(
+        studio_db, "get_connection", _raises("database is locked")
+    )
+    from hub.utils import state_dir
+    monkeypatch.setattr(state_dir, "manifests_dir", _raises("state dir unreadable"))
+
+    assert transport_settings.get_download_transport_mode() == "http"
+    assert writes == {}
+
+
+def _raises(message: str):
+    def boom(*_args, **_kwargs):
+        raise RuntimeError(message)
+    return boom
+
+
 def test_a_prior_download_manifest_counts_as_use(monkeypatch, tmp_path):
     from hub.utils import state_dir
 

@@ -6,7 +6,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { type TransportMode, useTransportMode } from "@/features/hub";
+import {
+  type TransportMode,
+  useDownloadTransportCapabilities,
+  useTransportMode,
+} from "@/features/hub";
 import { type TranslationKey, useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
@@ -15,6 +19,7 @@ import {
   loadDownloadTransportSettings,
   subscribeDownloadTransportSettings,
 } from "../api/download-transport";
+import { xetIsUnavailable } from "../lib/download-transport-availability";
 import { SettingsRow } from "./settings-row";
 
 const OPTIONS: {
@@ -56,9 +61,16 @@ export function DownloadTransportRow() {
     return unsubscribe;
   }, []);
 
-  const xetUnavailable = settings?.xetAvailable === false;
+  // The Hub's capabilities are the fallback: a failed settings read must not offer Xet on a
+  // machine that cannot run it, which leaving settings null would do.
+  const { capabilities } = useDownloadTransportCapabilities();
+  const xetUnavailable = xetIsUnavailable(
+    settings?.xetAvailable,
+    capabilities?.xet.available,
+  );
   const xetReason =
     settings?.xetUnavailableReason ??
+    capabilities?.xet.reason ??
     t("settings.general.downloads.xetMissing");
 
   // Xet is selected but cannot run here: say so, rather than leaving a selected

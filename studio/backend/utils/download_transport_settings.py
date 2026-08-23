@@ -28,6 +28,9 @@ _PRIOR_USE_TABLES = ("app_settings", "chat_threads", "training_runs")
 
 _seed_lock = threading.Lock()
 _seeded_default: Optional[str] = None
+# Whether the last evidence check could actually read the install. A guess is never persisted.
+_evidence_readable = True
+_seed_persisted = False
 
 
 def normalize_transport_mode(value: Any) -> Optional[str]:
@@ -42,8 +45,12 @@ def _has_prior_studio_use() -> bool:
     """Whether this install was used before the default changed.
 
     Positive evidence only: a row the user wrote, or a manifest from an earlier download. Anything
-    unreadable answers False, so grandfathering never rests on a guess.
+    unreadable answers False, so grandfathering never rests on a guess. It also records whether the
+    evidence could be read at all, so a False from a locked db is not persisted as the answer.
     """
+    global _evidence_readable
+    found = False
+    readable = False
     try:
         from storage.studio_db import get_connection
         conn = get_connection()
@@ -56,20 +63,25 @@ def _has_prior_studio_use() -> bool:
                 if exists is None:
                     continue
                 if conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is not None:
-                    return True
+                    found = True
+                    break
+            readable = True
         finally:
             conn.close()
     except Exception as exc:  # noqa: BLE001 - an unreadable db must not block a download
         logger.debug("download transport seed: studio.db unreadable (%s)", exc)
 
-    try:
-        from hub.utils import state_dir
-        manifests = state_dir.manifests_dir()
-        if manifests is not None and manifests.is_dir():
-            return any(manifests.iterdir())
-    except Exception as exc:  # noqa: BLE001 - same
-        logger.debug("download transport seed: manifests unreadable (%s)", exc)
-    return False
+    if not found:
+        try:
+            from hub.utils import state_dir
+            manifests = state_dir.manifests_dir()
+            found = manifests is not None and manifests.is_dir() and any(manifests.iterdir())
+            readable = True
+        except Exception as exc:  # noqa: BLE001 - same
+            logger.debug("download transport seed: manifests unreadable (%s)", exc)
+
+    _evidence_readable = readable
+    return found
 
 
 def seeded_default_transport_mode() -> str:
@@ -97,12 +109,22 @@ def get_download_transport_mode() -> str:
         return stored
 
     seeded = seeded_default_transport_mode()
-    try:
-        from storage.studio_db import upsert_app_settings
-        upsert_app_settings({DOWNLOAD_TRANSPORT_SETTING_KEY: seeded})
-        logger.info("Seeded the download transport for this install: %s", seeded)
-    except Exception as exc:  # noqa: BLE001 - an unwritable db just re-seeds next time
-        logger.debug("download transport seed not persisted (%s)", exc)
+    if not _evidence_readable:
+        # The install could not be read, so this is a fallback, not a verdict. Decide again later
+        # rather than freezing a legacy install onto HTTPS because the db was momentarily locked.
+        return seeded
+    global _seed_persisted
+    with _seed_lock:
+        # Concurrent first reads all see no stored value, and without this each one writes it.
+        if _seed_persisted:
+            return seeded
+        try:
+            from storage.studio_db import upsert_app_settings
+            upsert_app_settings({DOWNLOAD_TRANSPORT_SETTING_KEY: seeded})
+            _seed_persisted = True
+            logger.info("Seeded the download transport for this install: %s", seeded)
+        except Exception as exc:  # noqa: BLE001 - an unwritable db just re-seeds next time
+            logger.debug("download transport seed not persisted (%s)", exc)
     return seeded
 
 
@@ -120,6 +142,8 @@ def set_download_transport_mode(value: Any) -> str:
 
 def reset_seed_cache_for_tests() -> None:
     """Drop the per-process seed so a test can set up a different install."""
-    global _seeded_default
+    global _seeded_default, _evidence_readable, _seed_persisted
     with _seed_lock:
         _seeded_default = None
+        _evidence_readable = True
+        _seed_persisted = False

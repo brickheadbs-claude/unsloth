@@ -41,7 +41,9 @@ export function TransportToggle() {
 
   useEffect(() => {
     if (mode === "xet" && xetUnavailable) {
-      setMode("http");
+      // Browser-local: nobody asked for this, so it must not rewrite the install's setting for
+      // other browsers and scripted callers, which may well be able to run Xet.
+      setMode("http", { installWide: false });
     }
   }, [mode, setMode, xetUnavailable]);
 

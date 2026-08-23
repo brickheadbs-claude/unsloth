@@ -2,9 +2,12 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { authFetch } from "@/features/auth";
+import { disposableTimeoutSignal } from "@/features/hub/lib/abort-signals";
 import { readFastApiError } from "@/lib/format-fastapi-error";
 
 const DOWNLOAD_TRANSPORT_EVENT = "unsloth-download-transport-change";
+// A download start awaits this read, so it must not be able to wait forever.
+const TRANSPORT_SETTING_TIMEOUT_MS = 5_000;
 
 export type DownloadTransportMode = "auto" | "xet" | "http";
 
@@ -58,7 +61,8 @@ function fromApi(
   return {
     mode: asMode(settings.mode, "http"),
     defaultMode: asMode(settings.default_mode, "http"),
-    xetAvailable: settings.xet_available,
+    // Anything but a true from the backend leaves Xet greyed out, never wrongly offered.
+    xetAvailable: settings.xet_available === true,
     xetUnavailableReason: settings.xet_unavailable_reason,
     autoResolvesTo: settings.auto_resolves_to === "xet" ? "xet" : "http",
     autoReason: settings.auto_reason,
@@ -74,7 +78,10 @@ function cacheTransport(settings: DownloadTransportSettings) {
 }
 
 async function fetchDownloadTransportSettings(): Promise<DownloadTransportSettings> {
-  const res = await authFetch("/api/settings/download-transport");
+  const timeout = disposableTimeoutSignal(TRANSPORT_SETTING_TIMEOUT_MS);
+  const res = await authFetch("/api/settings/download-transport", {
+    signal: timeout.signal,
+  }).finally(() => timeout.dispose());
   if (!res.ok) {
     throw new Error(
       await readFastApiError(res, "Failed to load download transport settings"),
