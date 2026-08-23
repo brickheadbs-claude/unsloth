@@ -128,13 +128,10 @@ def test_a_guess_from_an_unreadable_install_is_not_persisted(real_install, monke
     writes: dict = {}
     monkeypatch.setattr(studio_db, "get_app_setting", lambda key, fallback = None: None)
     monkeypatch.setattr(studio_db, "upsert_app_settings", lambda updates: writes.update(updates))
-    monkeypatch.setattr(
-        transport_settings, "_PRIOR_USE_TABLES", ("app_settings",)
-    )
-    monkeypatch.setattr(
-        studio_db, "get_connection", _raises("database is locked")
-    )
+    monkeypatch.setattr(transport_settings, "_PRIOR_USE_TABLES", ("app_settings",))
+    monkeypatch.setattr(studio_db, "get_connection", _raises("database is locked"))
     from hub.utils import state_dir
+
     monkeypatch.setattr(state_dir, "manifests_dir", _raises("state dir unreadable"))
 
     assert transport_settings.get_download_transport_mode() == "http"
@@ -144,6 +141,7 @@ def test_a_guess_from_an_unreadable_install_is_not_persisted(real_install, monke
 def _raises(message: str):
     def boom(*_args, **_kwargs):
         raise RuntimeError(message)
+
     return boom
 
 

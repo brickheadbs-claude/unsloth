@@ -74,6 +74,7 @@ def _has_prior_studio_use() -> bool:
     if not found:
         try:
             from hub.utils import state_dir
+
             manifests = state_dir.manifests_dir()
             found = manifests is not None and manifests.is_dir() and any(manifests.iterdir())
             readable = True
@@ -120,6 +121,7 @@ def get_download_transport_mode() -> str:
             return seeded
         try:
             from storage.studio_db import upsert_app_settings
+
             upsert_app_settings({DOWNLOAD_TRANSPORT_SETTING_KEY: seeded})
             _seed_persisted = True
             logger.info("Seeded the download transport for this install: %s", seeded)
